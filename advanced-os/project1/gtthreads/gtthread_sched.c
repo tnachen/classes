@@ -23,11 +23,6 @@ gtthreads library.  A simple round-robin queue should be used.
    they see fit.
  */
 
-typedef struct thread_context {
-        void *(*start_routine)(void *);
-        void *arg;
-} thread_context;
-
 long gtthread_period = 0;
 
 static sigset_t vtalrm;
@@ -50,18 +45,22 @@ void schedule_next(int sig) {
   sigprocmask(SIG_BLOCK, &vtalrm, NULL);
 
   if (steque_isempty(&queue)) {
+    if (!current) {
+      // No threads to schedule and nothing running.
+      sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
+      return;
+    }
 
     // Current thread finished and no more threads to run.
     if (current->finished && current->cancelled) {
       current = NULL;
-
     }
     sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
     return;
   }
 
   gtthread_t* nextThread = steque_pop(&queue);
-  if (!current->finished && !current->cancelled) {
+  if (current && !current->finished && !current->cancelled) {
     steque_enqueue(&queue, current);
   }
   ucontext_t * currentContext = NULL;
@@ -112,9 +111,9 @@ void gtthread_init(long period){
 }
 
 
-void run_thread(void* p)
-  void* retval = ((thread_context*)p)->start_routine(((thread_context*)p)->arg);
-  free(p);
+void run_thread(void *(*start_routine)(void *), void* args)
+{
+  void * retval = start_routine(args);
   gtthread_exit(retval);
 }
 
@@ -141,10 +140,7 @@ int gtthread_create(gtthread_t *thread,
   thread->ucp.uc_stack.ss_size = SIGSTKSZ;
   thread->ucp.uc_link = &main_context;
 
-  thread_context* t = (thread_context*) malloc(sizeof(thread_context));
-  t->start_routine = start_routine;
-  t->arg = arg;
-  makecontext(&thread->ucp, &run_thread, 1, t);
+  makecontext(&thread->ucp, run_thread, 2, start_routine, arg);
 
   threads[thread->id] = thread;
   sigprocmask(SIG_BLOCK, &vtalrm, NULL);
@@ -157,9 +153,14 @@ int gtthread_create(gtthread_t *thread,
   The gtthread_join() function is analogous to pthread_join.
   All gtthreads are joinable.
  */
-int gtthread_join(gtthread_t thread, void **status){
+int gtthread_join(gtthread_t thread, void **status) {
+  while (!thread.finished && !thread.cancelled) {
+    gtthread_yield();
+  }
 
-        return -1;
+  *status = thread.retval;
+
+  return 0;
 }
 
 /*
