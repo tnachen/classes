@@ -17,7 +17,7 @@ typedef struct gtthread_t {
   bool cancelled;
   bool finished;
   void* retval;
-  bool joining;
+  int joined_thread_id;
 } gtthread_t;
 
 typedef struct gtthread_mutex_t {

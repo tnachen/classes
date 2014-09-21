@@ -23,15 +23,15 @@ gtthreads library.  A simple round-robin queue should be used.
    they see fit.
  */
 
-long gtthread_period = 0;
-
 static sigset_t vtalrm;
 
 // Maximum of 100 threads!
 gtthread_t* threads[100];
 
+gtthread_t mainThread;
+
 // current running thread.
-gtthread_t* current;
+gtthread_t* current = &mainThread;
 
 // counter that keep tracks of ids.
 int idCounter = 0;
@@ -39,35 +39,37 @@ int idCounter = 0;
 // scheduler queue.
 steque_t queue;
 
-ucontext_t main_context;
-
 void schedule_next(int sig) {
   sigprocmask(SIG_BLOCK, &vtalrm, NULL);
 
   if (steque_isempty(&queue)) {
-    if (!current) {
-      // No threads to schedule and nothing running.
+    // Current thread finished and no more threads to run.
+    if (current->finished || current->cancelled) {
+      // Swap current thread back to main thread.
+      ucontext_t * curContext = &current->ucp;
+      current = &mainThread;
       sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
+      swapcontext(curContext, &mainThread.ucp);
       return;
     }
-
-    // Current thread finished and no more threads to run.
-    if (current->finished && current->cancelled) {
-      current = NULL;
-    }
+    // Keep running the current thread since nothing else is queued.
     sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
     return;
   }
 
   gtthread_t* nextThread = steque_pop(&queue);
-  if (current && !current->finished && !current->cancelled) {
+
+  // Do not enqueue main thread or thread already terminated.
+  if ((current->id != mainThread.id) && 
+      !current->finished && 
+      !current->cancelled) {
     steque_enqueue(&queue, current);
   }
   ucontext_t * currentContext = NULL;
   if (current != NULL) {
     currentContext = &current->ucp;
   } else {
-    currentContext = &main_context;
+    currentContext = &mainThread.ucp;
   }
   current = nextThread;
   sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
@@ -93,12 +95,10 @@ void schedule_next(int sig) {
   for pthread_create.
  */
 void gtthread_init(long period){
-  gtthread_period = period;
+  mainThread.joined_thread_id = -1;
+  mainThread.id = -100;
   sigemptyset(&vtalrm);
   sigaddset(&vtalrm, SIGVTALRM);
-  struct itimerval* T = (struct itimerval*) malloc(sizeof(struct itimerval));
-  T->it_value.tv_sec = T->it_interval.tv_sec = 0;
-  T->it_value.tv_usec = T->it_interval.tv_usec = period;
   struct sigaction act;
   memset (&act, '\0', sizeof(act));
   act.sa_handler = &schedule_next;
@@ -107,7 +107,12 @@ void gtthread_init(long period){
     exit(1);
   }
   steque_init(&queue);
-  setitimer(ITIMER_VIRTUAL, T, NULL);
+  if (period > 0) {
+    struct itimerval* T = (struct itimerval*) malloc(sizeof(struct itimerval));
+    T->it_value.tv_sec = T->it_interval.tv_sec = 0;
+    T->it_value.tv_usec = T->it_interval.tv_usec = period;
+    setitimer(ITIMER_VIRTUAL, T, NULL);
+  }
 }
 
 
@@ -125,7 +130,10 @@ void run_thread(void *(*start_routine)(void *), void* args)
 int gtthread_create(gtthread_t *thread,
 		    void *(*start_routine)(void *),
 		    void *arg){
+  thread->finished = false;
+  thread->cancelled = false;
   thread->id = idCounter++;
+  thread->joined_thread_id = -1;
   if (thread->id >= 100) {
     perror("Max thread count reached!");
     exit(-1);
@@ -138,7 +146,7 @@ int gtthread_create(gtthread_t *thread,
 
   thread->ucp.uc_stack.ss_sp = (char*) malloc(SIGSTKSZ);
   thread->ucp.uc_stack.ss_size = SIGSTKSZ;
-  thread->ucp.uc_link = &main_context;
+  thread->ucp.uc_link = &mainThread.ucp;
 
   makecontext(&thread->ucp, run_thread, 2, start_routine, arg);
 
@@ -154,11 +162,29 @@ int gtthread_create(gtthread_t *thread,
   All gtthreads are joinable.
  */
 int gtthread_join(gtthread_t thread, void **status) {
-  while (!thread.finished && !thread.cancelled) {
+  if (gtthread_equal(thread, *current)) {
+    // Can't join yourself!
+    return -1;
+  }
+
+  gtthread_t* joinedThread = threads[thread.id];
+
+  if (current->joined_thread_id == joinedThread->id) {
+    printf("!\n");
+
+    // DEADLOCK!
+    return -2;
+  }
+
+  joinedThread->joined_thread_id = current->id;
+
+  while (!joinedThread->finished && !joinedThread->cancelled) {
     gtthread_yield();
   }
 
-  *status = thread.retval;
+  if (status != NULL) {
+    *status = joinedThread->retval;
+  }
 
   return 0;
 }
@@ -187,7 +213,7 @@ void gtthread_yield(void){
   returning non-zero if the threads are the same and zero otherwise.
  */
 int gtthread_equal(gtthread_t t1, gtthread_t t2){
-  return t1.id - t2.id;
+  return t1.id == t2.id ? 1 : 0;
 }
 
 /*
@@ -195,7 +221,7 @@ int gtthread_equal(gtthread_t t1, gtthread_t t2){
   allowing one thread to terminate another asynchronously.
  */
 int gtthread_cancel(gtthread_t thread){
-  thread.cancelled = true;
+  threads[thread.id]->cancelled = true;
   return 0;
 }
 
