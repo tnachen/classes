@@ -60,8 +60,8 @@ void schedule_next(int sig) {
   gtthread_t* nextThread = steque_pop(&queue);
 
   // Do not enqueue main thread or thread already terminated.
-  if ((current->id != mainThread.id) && 
-      !current->finished && 
+  if (!gtthread_equal(*current, mainThread) &&
+      !current->finished &&
       !current->cancelled) {
     steque_enqueue(&queue, current);
   }
@@ -119,7 +119,12 @@ void gtthread_init(long period){
 void run_thread(void *(*start_routine)(void *), void* args)
 {
   void * retval = start_routine(args);
-  gtthread_exit(retval);
+  if (gtthread_equal(*current, mainThread)) {
+    int * t = (int *)retval;
+    exit(*t);
+  } else {
+    gtthread_exit(retval);
+  }
 }
 
 
@@ -170,8 +175,6 @@ int gtthread_join(gtthread_t thread, void **status) {
   gtthread_t* joinedThread = threads[thread.id];
 
   if (current->joined_thread_id == joinedThread->id) {
-    printf("!\n");
-
     // DEADLOCK!
     return -2;
   }
