@@ -31,7 +31,6 @@ int main() {
   gtthread_create( &t1, thr1, NULL);
   gtthread_create( &t2, thr2, NULL);
   gtthread_join(t1, NULL);
-  gtthread_join(t2, NULL);
   
   return EXIT_SUCCESS;
 }
