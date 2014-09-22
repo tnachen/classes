@@ -9,6 +9,8 @@
 #define true 1
 #define false 0
 
+static sigset_t vtalrm;
+
 /* Define gtthread_t and gtthread_mutex_t types here */
 
 typedef struct gtthread_t {
@@ -21,8 +23,13 @@ typedef struct gtthread_t {
 } gtthread_t;
 
 typedef struct gtthread_mutex_t {
-
+  steque_t parkingLot;
+  int lockedThreadId;
+  bool locked;
 } gtthread_mutex_t;
+
+// Current running thread!
+extern gtthread_t * currentThread;
 
 void gtthread_init(long period);
 int  gtthread_create(gtthread_t *thread,

@@ -23,16 +23,12 @@ gtthreads library.  A simple round-robin queue should be used.
    they see fit.
  */
 
-static sigset_t vtalrm;
-
 // Maximum of 100 threads!
 gtthread_t* threads[100];
 
 gtthread_t mainThread;
-//ucontext_t schedulerContext;
 
-// current running thread.
-gtthread_t* current = &mainThread;
+gtthread_t* currentThread;
 
 // counter that keep tracks of ids.
 int idCounter = 0;
@@ -45,10 +41,10 @@ void schedule_next(int sig) {
 
   if (steque_isempty(&queue)) {
     // Current thread finished and no more threads to run.
-    if (current->finished || current->cancelled) {
+    if (currentThread->finished || currentThread->cancelled) {
       // Swap current thread back to main thread.
-      ucontext_t * curContext = &current->ucp;
-      current = &mainThread;
+      ucontext_t * curContext = &currentThread->ucp;
+      currentThread = &mainThread;
       sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
       swapcontext(curContext, &mainThread.ucp);
       return;
@@ -61,17 +57,17 @@ void schedule_next(int sig) {
   gtthread_t* nextThread = steque_pop(&queue);
 
   // Do not enqueue thread that already terminated.
-  if (!current->finished &&
-      !current->cancelled) {
-    steque_enqueue(&queue, current);
+  if (!currentThread->finished &&
+      !currentThread->cancelled) {
+    steque_enqueue(&queue, currentThread);
   }
   ucontext_t * currentContext = NULL;
-  if (current != NULL) {
-    currentContext = &current->ucp;
+  if (currentThread != NULL) {
+    currentContext = &currentThread->ucp;
   } else {
     currentContext = &mainThread.ucp;
   }
-  current = nextThread;
+  currentThread = nextThread;
   sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
   swapcontext(currentContext, &nextThread->ucp);
 }
@@ -95,6 +91,7 @@ void schedule_next(int sig) {
   for pthread_create.
  */
 void gtthread_init(long period){
+  currentThread = &mainThread;
   // initialize main thread.
   mainThread.joined_thread_id = -1;
   mainThread.id = -100;
@@ -138,7 +135,7 @@ void gtthread_init(long period){
 void run_thread(void *(*start_routine)(void *), void* args)
 {
   void * retval = start_routine(args);
-  if (gtthread_equal(*current, mainThread)) {
+  if (gtthread_equal(*currentThread, mainThread)) {
     int * t = (int *)retval;
     exit(*t);
   } else {
@@ -186,19 +183,19 @@ int gtthread_create(gtthread_t *thread,
   All gtthreads are joinable.
  */
 int gtthread_join(gtthread_t thread, void **status) {
-  if (gtthread_equal(thread, *current)) {
+  if (gtthread_equal(thread, *currentThread)) {
     // Can't join yourself!
     return -1;
   }
 
   gtthread_t* joinedThread = threads[thread.id];
 
-  if (current->joined_thread_id == joinedThread->id) {
+  if (currentThread->joined_thread_id == joinedThread->id) {
     // DEADLOCK!
     return -2;
   }
 
-  joinedThread->joined_thread_id = current->id;
+  joinedThread->joined_thread_id = currentThread->id;
 
   while (!joinedThread->finished && !joinedThread->cancelled) {
     gtthread_yield();
@@ -215,8 +212,8 @@ int gtthread_join(gtthread_t thread, void **status) {
   The gtthread_exit() function is analogous to pthread_exit.
  */
 void gtthread_exit(void* retval) {
-  current->retval = retval;
-  current->finished = true;
+  currentThread->retval = retval;
+  currentThread->finished = true;
   raise(SIGVTALRM);
 }
 
@@ -251,5 +248,5 @@ int gtthread_cancel(gtthread_t thread){
   Returns calling thread.
  */
 gtthread_t gtthread_self(void) {
-  return *current;
+  return *currentThread;
 }
