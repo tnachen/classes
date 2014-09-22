@@ -29,6 +29,7 @@ static sigset_t vtalrm;
 gtthread_t* threads[100];
 
 gtthread_t mainThread;
+//ucontext_t schedulerContext;
 
 // current running thread.
 gtthread_t* current = &mainThread;
@@ -59,9 +60,8 @@ void schedule_next(int sig) {
 
   gtthread_t* nextThread = steque_pop(&queue);
 
-  // Do not enqueue main thread or thread already terminated.
-  if (!gtthread_equal(*current, mainThread) &&
-      !current->finished &&
+  // Do not enqueue thread that already terminated.
+  if (!current->finished &&
       !current->cancelled) {
     steque_enqueue(&queue, current);
   }
@@ -95,8 +95,27 @@ void schedule_next(int sig) {
   for pthread_create.
  */
 void gtthread_init(long period){
+  // initialize main thread.
   mainThread.joined_thread_id = -1;
   mainThread.id = -100;
+  if (getcontext(&mainThread.ucp) < 0) {
+    perror("Unable to getcontext for main");
+    exit(-1);
+  }
+  mainThread.ucp.uc_stack.ss_sp = (char*) malloc(SIGSTKSZ);
+  mainThread.ucp.uc_stack.ss_size = SIGSTKSZ;
+
+  /*
+  // initialize schedulder context.
+  if (getcontext(&schedulerContext) < 0) {
+    perror("Unable to getcontext for scheduler");
+    exit(-1);
+  }
+
+  schedulerContext.uc_stack.ss_sp = (char*) malloc(SIGSTKSZ);
+  schedulerContext.uc_stack.ss_size = SIGSTKSZ;
+  */
+
   sigemptyset(&vtalrm);
   sigaddset(&vtalrm, SIGVTALRM);
   struct sigaction act;
