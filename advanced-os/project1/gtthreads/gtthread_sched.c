@@ -18,6 +18,8 @@ gtthreads library.  A simple round-robin queue should be used.
 
 #include "gtthread.h"
 
+static sigset_t vtalrm;
+
 /*
    Students should define global variables and helper functions as
    they see fit.

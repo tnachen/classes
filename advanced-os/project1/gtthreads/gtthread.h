@@ -9,8 +9,6 @@
 #define true 1
 #define false 0
 
-static sigset_t vtalrm;
-
 /* Define gtthread_t and gtthread_mutex_t types here */
 
 typedef struct gtthread_t {
