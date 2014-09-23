@@ -32,16 +32,16 @@ int gtthread_mutex_init(gtthread_mutex_t* mutex){
   Returns zero on success.
  */
 int gtthread_mutex_lock(gtthread_mutex_t* mutex){
-  sigprocmask(SIG_BLOCK, &vtalrm, NULL);
+  //sigprocmask(SIG_BLOCK, &vtalrm, NULL);
   if (mutex->locked == false) {
     mutex->locked = true;
     mutex->lockedThreadId = currentThread->id;
-    sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
+    //sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
     return 0;
   }
 
   steque_enqueue(&mutex->parkingLot, &currentThread->id);
-  sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
+  //sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
 
   // spin until locked.
   while(1) {
@@ -49,16 +49,16 @@ int gtthread_mutex_lock(gtthread_mutex_t* mutex){
       gtthread_yield();
     }
 
-    sigprocmask(SIG_BLOCK, &vtalrm, NULL);
+    //sigprocmask(SIG_BLOCK, &vtalrm, NULL);
     int * nextId = (int *)steque_front(&mutex->parkingLot);
     if (*nextId == currentThread->id) {
       steque_pop(&mutex->parkingLot);
       mutex->locked = true;
       mutex->lockedThreadId = currentThread->id;
-      sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
+      //sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
       return 0;
     } else {
-      sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
+      //sigprocmask(SIG_UNBLOCK, &vtalrm, NULL);
       gtthread_yield();
     }
   }
